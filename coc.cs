@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using System.Collections;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 
 class Player
 {
@@ -39,7 +40,7 @@ class Player
         }
 
         public static double Angle(Coord first, Coord second) {
-            double dy = (second.Y - first.X) * SQRT3_2;
+            double dy = (second.Y - first.Y) * SQRT3_2;
             double dx = second.X - first.X + ((first.Y - second.Y) & 1) * 0.5;
             double angle = -Math.Atan2(dy, dx) * THREE_OVER_PI;
             if (angle < 0) {
@@ -83,6 +84,14 @@ class Player
             if (!(obj is Coord)) return false;            
             return ((Coord)obj).Y == this.Y && ((Coord)obj).X == this.X;
         }
+        public static bool operator ==(Coord lhs, Coord rhs ) 
+		{
+			return (lhs.X == rhs.X) && (lhs.Y == rhs.Y);
+		}
+		public static bool operator !=(Coord lhs, Coord rhs ) 
+		{
+			return (lhs.X != rhs.X) && (lhs.Y != rhs.Y);
+		}
         
         public override int GetHashCode()
         {
@@ -94,18 +103,22 @@ class Player
         }
     }
     
+    [StructLayout(LayoutKind.Sequential)]
     public struct Hex {
-        public static Hex Zero = new Hex(0,0,0);
+        public readonly sbyte X;
+        public readonly sbyte Y;
+        public readonly sbyte Z;
+        private readonly short hc; 
         
         public static Hex[] DIR = new Hex[] { new Hex(1,-1,0), new Hex(1,0,-1), new Hex(0,1,-1), new Hex(-1,1,0), new Hex(-1,0,1), new Hex(0,-1,1)};
-        public readonly int X;
-        public readonly int Y;
-        public readonly int Z;
+        public static Hex Zero = new Hex(0,0,0);        
+        
 
         public Hex(int x, int y, int z) {
-            this.X = x;
-            this.Y = y;
-            this.Z = z;
+            this.X = (sbyte)x;
+            this.Y = (sbyte)y;
+            this.Z = (sbyte)z;
+            hc = (short)((z << 5) + x + (z - (z & 1)) / 2); // save hash code
         }
 
         public Coord ToOffset() {
@@ -141,7 +154,7 @@ class Player
 		public override bool Equals(Object o) 
 		{
 		    Hex rhs = ((Hex)o);
-			return (this.X == rhs.X) && (this.Y == rhs.Y) && (this.Z == rhs.Z);
+			return (this.hc == rhs.hc);
 		}
 		
         public static int Dist(Hex src, Hex dst) {
@@ -150,7 +163,7 @@ class Player
 
         public override int GetHashCode()
         {
-            return this.X + this.Y * MAX_X + this.Z * MAX_X * MAX_X;
+            return this.hc;
         }
         
         public override String ToString() {
@@ -166,7 +179,7 @@ class Player
     }
     class Entity {
         public Entity (int id, EType t, int x, int y) {
-            Id = id; Pos = new Coord(x, y).ToHex(); T = t;
+            Id = id; Pos = new Coord(x, y).ToHex(); T = t; Target = -1;
         }
         public int Id { get; set; } // id
         public EType T { get; set; } // type
@@ -176,11 +189,19 @@ class Player
         public int Stock { get; set; }
         public int Angle { get; set; }
         public int CoolOff { get; set; }
+        public int Target { get; set; }
         public override string ToString() {
             return String.Format("{0}.{1}: ({2})", T.ToString()[0], Id, Pos.ToOffset());
         }
     }
     class Action {
+        private static Action WAIT = new Action("WAIT");
+        private static Action MINE = new Action("MINE");
+        private static Action SLOW = new Action("SLOWER");
+        private static Action PORT = new Action("PORT");
+        private static Action STAR = new Action("STARBOARD");
+        private static Action FAST = new Action("FASTER");
+         
         public Action(string verb) {
             Verb = verb;
         }
@@ -199,15 +220,178 @@ class Player
         public static Action Fire(int x, int y) { return new Action("FIRE") { Arg1 = x, Arg2 = y }; }
         public static Action Fire(Coord c) { return new Action("FIRE") { Arg1 = c.X, Arg2 = c.Y }; }
         
-        public static Action Wait() { return new Action("WAIT"); }
-        public static Action Mine() { return new Action("MINE"); }
-        public static Action Slow() { return new Action("SLOWER"); }
+        public static Action Wait() { return WAIT; }
+        public static Action Mine() { return MINE; }
+        public static Action Slow() { return SLOW; }
+        public static Action Port() { return PORT; }   // CCW (left)
+        public static Action Star() { return STAR; }
+        public static Action Fast() { return FAST; } // CW (right)
+
+        public override bool Equals(Object other) {
+            Action otherAction = (Action)other;
+            return (otherAction.Verb == Verb && otherAction.Arg1 == Arg1 && otherAction.Arg2 == Arg2);
+        }
+
+        public static bool operator ==(Action lhs, Action rhs ) 
+        {
+            return (lhs.Verb == rhs.Verb && lhs.Arg1 == rhs.Arg1 && lhs.Arg2 == rhs.Arg2);
+        }
+        public static bool operator !=(Action lhs, Action rhs ) 
+        {
+            return !(lhs.Verb == rhs.Verb && lhs.Arg1 == rhs.Arg1 && lhs.Arg2 == rhs.Arg2);
+        }
+        public override int GetHashCode() {            
+            return Verb.GetHashCode() + (Arg1 << 16) + (Arg2 << 8);
+        }
+    }
+    
+    /** Do BFS, from <start> to <finish>, returns a list of orientations **/
+    static List<int> BFS(Hex start, int orient, Hex finish) {
+        return new List<int>();
+    }
+    
+    [StructLayout(LayoutKind.Sequential)]
+    struct Step {
+        private byte speedOrient;
+        public readonly Hex Pos;
+        
+        public Step(Hex h, int orient, int speed) {
+            Pos = h;
+            speedOrient = (byte)((speed << 4) + orient);
+        }
+        
+        public int Speed { get { return speedOrient >> 4; } }
+        public int Orient { get { return (speedOrient & 0x0F); } }
+        
+        public override bool Equals(Object o) 
+		{
+		    Step rhs = ((Step)o);
+			return (this.speedOrient == rhs.speedOrient) && (this.Pos == rhs.Pos);
+		}
+		
+        public override int GetHashCode() {
+            return (speedOrient << 24) & Pos.GetHashCode();
+        }
+    }
+    
+    static Action Route(Entity ship, Coord targetPosition) {
+        Coord currentPosition = ship.Pos.ToOffset();
+        Action nextAction = Action.Wait();  // default to doing nothing..
+        int orientation = ship.Angle;
+
+        if (currentPosition == targetPosition) {
+            return Action.Slow();
+        }
+
+        double targetAngle, angleStraight, anglePort, angleStarboard, centerAngle, anglePortCenter, angleStarboardCenter;
+
+        switch (ship.Speed) {
+            case 2:
+                return Action.Slow();       // TODO: update this code path to compute for fast speed
+                break;
+            case 1:
+                // Suppose we've moved first
+                currentPosition = currentPosition.Neighbor(orientation);
+                if (!currentPosition.IsValid()) {
+                    return Action.Slow();
+                    break;
+                }
+
+                // Target reached at next turn
+                if (currentPosition == targetPosition) {
+                    return Action.Wait();
+                    break;
+                }
+
+                // For each neighbor cell, find the closest to target
+                targetAngle = Coord.Angle(currentPosition, targetPosition);
+                angleStraight = Math.Min(Math.Abs(orientation - targetAngle), 6 - Math.Abs(orientation - targetAngle));
+                anglePort = Math.Min(Math.Abs((orientation + 1) - targetAngle), Math.Abs((orientation - 5) - targetAngle));
+                angleStarboard = Math.Min(Math.Abs((orientation + 5) - targetAngle), Math.Abs((orientation - 1) - targetAngle));
+
+                centerAngle = Coord.Angle(currentPosition, new Coord(MAX_X / 2, MAX_Y / 2));
+                anglePortCenter = Math.Min(Math.Abs((orientation + 1) - centerAngle), Math.Abs((orientation - 5) - centerAngle));
+                angleStarboardCenter = Math.Min(Math.Abs((orientation + 5) - centerAngle), Math.Abs((orientation - 1) - centerAngle));
+
+                Console.Error.WriteLine("targetAngle: {0}, angle- Straight: {1}, Port: {2}, Star: {3};\nAngle Center: {4}, Port: {5}, Star: {6}", targetAngle, angleStraight, anglePort, angleStarboard, centerAngle, anglePortCenter, angleStarboardCenter);
+
+                // Next to target with bad angle, slow down then rotate (avoid to turn around the target!)
+                if (currentPosition.Dist(targetPosition) == 1 && angleStraight > 1.5) {
+                    nextAction = Action.Slow();
+                    break;
+                }
+
+                int distanceMin = int.MaxValue;
+                
+                // Test forward
+                Coord nextPosition = currentPosition.Neighbor(orientation);
+                if (nextPosition.IsValid()) {
+                    distanceMin = nextPosition.Dist(targetPosition);
+                    // going forward, just wait..                    
+                }
+
+                // Test port
+                nextPosition = currentPosition.Neighbor((orientation + 1) % 6);
+                if (nextPosition.IsValid()) {
+                    int distance = nextPosition.Dist(targetPosition);
+                    if (distance < distanceMin || distance == distanceMin && anglePort < angleStraight - 0.5) {
+                        distanceMin = distance;
+                        nextAction = Action.Port();
+                    }
+                }
+
+                // Test starboard
+                nextPosition = currentPosition.Neighbor((orientation + 5) % 6);
+                if (nextPosition.IsValid()) {
+                    int distance = nextPosition.Dist(targetPosition);
+                    if (distance < distanceMin
+                            || (distance == distanceMin && angleStarboard < anglePort - 0.5 && nextAction == Action.Port())
+                            || (distance == distanceMin && angleStarboard < angleStraight - 0.5 && nextAction == Action.Wait())
+                            || (distance == distanceMin && nextAction == Action.Port() && angleStarboard == anglePort
+                                    && angleStarboardCenter < anglePortCenter)
+                            || (distance == distanceMin && nextAction == Action.Port() && angleStarboard == anglePort
+                                    && angleStarboardCenter == anglePortCenter && (orientation == 1 || orientation == 4))) {
+                        distanceMin = distance;
+                        nextAction = Action.Star();
+                    }
+                }
+                break;
+            case 0:
+                // Rotate ship towards target
+                targetAngle = Coord.Angle(currentPosition, targetPosition);                
+                angleStraight = Math.Min(Math.Abs(orientation - targetAngle), 6 - Math.Abs(orientation - targetAngle));
+                anglePort = Math.Min(Math.Abs((orientation + 1) - targetAngle), Math.Abs((orientation - 5) - targetAngle));
+                angleStarboard = Math.Min(Math.Abs((orientation + 5) - targetAngle), Math.Abs((orientation - 1) - targetAngle));
+
+                centerAngle = Coord.Angle(currentPosition, new Coord(MAX_X / 2, MAX_Y / 2));
+                anglePortCenter = Math.Min(Math.Abs((orientation + 1) - centerAngle), Math.Abs((orientation - 5) - centerAngle));
+                angleStarboardCenter = Math.Min(Math.Abs((orientation + 5) - centerAngle), Math.Abs((orientation - 1) - centerAngle));
+
+                Console.Error.WriteLine("targetAngle: {0}, angle- Straight: {1}, Port: {2}, Star: {3};\nAngle Center: {4}, Port: {5}, Star: {6}", targetAngle, angleStraight, anglePort, angleStarboard, centerAngle, anglePortCenter, angleStarboardCenter);
+
+                Coord forwardPosition = currentPosition.Neighbor(orientation);                
+
+                if (anglePort <= angleStarboard) {
+                    nextAction = Action.Port();
+                }
+
+                if (angleStarboard < anglePort || angleStarboard == anglePort && angleStarboardCenter < anglePortCenter
+                        || angleStarboard == anglePort && angleStarboardCenter == anglePortCenter && (orientation == 1 || orientation == 4)) {
+                    nextAction = Action.Star();
+                }
+
+                if (forwardPosition.IsValid() && angleStraight <= anglePort && angleStraight <= angleStarboard) {
+                    nextAction = Action.Fast();
+                }
+                break;
+        }
+        return nextAction;
     }
     
     static void Main(string[] args)
-    {        
+    {                
         // game loop
-        int lastClosest = -1; Board prevBoard = null;
+        Board prevBoard = null;
         while (true)
         {
             Board board = new Board();
@@ -228,15 +412,16 @@ class Player
                 
                 if(prevBoard != null && prevBoard.Entities.ContainsKey(ent.Id)) {
                     ent.CoolOff = Math.Max(0, prevBoard.Entities[ent.Id].CoolOff - 1);
+                    ent.Target = prevBoard.Entities[ent.Id].Target;
                 }
                 board.Entities.Add(ent.Id, ent);                
             }
 
-            foreach(var ship in board.MyShips)
+            foreach(var ship in board.MyShips.OrderBy(s => s.Stock))  // look at the ship that needs rum the most
             {
                 Hex shipFront = ship.Pos.Neighbor(ship.Angle);
                 Console.Error.Write(" -- Ship " + ship.Id + " at " + ship.Pos.ToOffset()); 
-                Console.Error.WriteLine(" facing " + ship.Angle + " (front at: " + shipFront.ToOffset() + ") ------------ ");
+                Console.Error.WriteLine(" facing " + ship.Angle + "; spd = " + ship.Speed + " (front at: " + shipFront.ToOffset() + ") ------------ ");
                 
                 Hex? canonTarget = null; bool firePriority = false;
                 if (ship.CoolOff == 0) {
@@ -254,22 +439,31 @@ class Player
                     }
                 }
                 
+                var activeTargets = board.MyShips
+                    .Where(s => s.Id != ship.Id && s.Target != -1 && board.Entities.ContainsKey(s.Target))
+                    .Select(s => s.Target);
+                Console.Error.Write("Active targets: ");
+                foreach(var at in activeTargets) {
+                    Console.Error.Write(at.ToString() + "; ");
+                }
+                Console.Error.WriteLine();
                 
                 Action nextAction = null;
                 Entity closest;
-                if(board.Entities.ContainsKey(lastClosest)) {
-                    closest = board.Entities[lastClosest];
+                if(board.Entities.ContainsKey(ship.Target)) {
+                    closest = board.Entities[ship.Target];
                 }else {
-                    closest = board.Entities.Values.Where(e => e.T == EType.BARREL)
+                    closest = board.Entities.Values
+                        .Where(e => e.T == EType.BARREL && !activeTargets.Contains(e.Id))
                         .OrderByDescending(b => b.Stock - Hex.Dist(ship.Pos, b.Pos)).FirstOrDefault();
                         
                     if(closest != null) {
-                        lastClosest = closest.Id;
+                        ship.Target = closest.Id;
                     }
                 }
                 if(closest != null) {
                     Console.Error.WriteLine("closest is :" + closest);                
-                    nextAction = Action.Move(closest.Pos.ToOffset());                    
+                    nextAction = Route(ship, closest.Pos.ToOffset());                    
                 }else {
                     Hex upperLeft = new Coord(0,0).ToHex();
                     Hex upperRight = new Coord(22,0).ToHex();
@@ -285,14 +479,14 @@ class Player
                     //Console.Error.WriteLine("upperLeft: " + upperLeftDist + ", upperRight: " + upperRightDist);
                     
                     if(upperLeftDist < upperRightDist) {
-                        nextAction = Action.Move(upperRight.ToOffset());
+                        nextAction = Route(ship, upperRight.ToOffset());
                     }else if(upperLeftDist > upperRightDist) {
-                        nextAction = Action.Move(upperLeft.ToOffset());
+                        nextAction = Route(ship, upperLeft.ToOffset());
                     }else {
                         if (Hex.Dist(ship.Pos, upperLeft) < Hex.Dist(ship.Pos, upperRight)) {
-                            nextAction = Action.Move(upperRight.ToOffset());
+                            nextAction = Route(ship, upperRight.ToOffset());
                         }else {
-                            nextAction = Action.Move(upperLeft.ToOffset());
+                            nextAction = Route(ship, upperLeft.ToOffset());
                         }
                     }                    
                 }

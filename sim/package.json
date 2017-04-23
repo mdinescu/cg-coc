@@ -1,0 +1,26 @@
+{
+  "name": "sim",
+  "version": "1.0.0",
+  "description": "simulator for ship routing on the hex map",
+  "main": "sim.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "babel src -d lib",
+    "watch": "babel src --watch -d lib"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mdinescu/cg-coc.git"
+  },
+  "author": "mdinescu",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/mdinescu/cg-coc/issues"
+  },
+  "homepage": "https://github.com/mdinescu/cg-coc#readme",
+  "devDependencies": {
+    "babel-cli": "^6.24.1",
+    "babel-preset-es2015": "^6.24.1",
+    "babel-preset-react": "^6.24.1"
+  }
+}
